@@ -14,7 +14,7 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from matplotlib.ticker import MaxNLocator
+from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 from matplotlib.patches import Rectangle
 import matplotlib
 
@@ -24,7 +24,72 @@ from astropy.io import fits
 from astropy import units as ap_units
 from astropy.coordinates import SkyCoord as ap_SkyCoord
 
-from beastplotlib import initialize_parser
+from .beastplotlib import initialize_parser
+
+def add_rectangle(fig, ax1, ax2, label, 
+                  linestyle='dashed', textorient='vertical',
+                  xoffset=0.05, yoffset=0.04):
+    '''
+    Add bounding rectangles around set of subplots
+    '''
+    loc1 = ax1.get_position()
+    loc2 = ax2.get_position()
+    r = Rectangle(xy=(loc1.x0-xoffset, loc2.y0-yoffset),
+               width=(loc2.x1 - loc1.x0)+(xoffset+0.02),
+               height=(loc1.y1-loc2.y0)+(yoffset+0.01),
+               transform=fig.transFigure,
+               clip_on=False, zorder=-1,
+               facecolor='none', edgecolor='k',
+               linewidth=1, linestyle=linestyle)
+    ax1.add_patch(r)
+    if textorient == 'vertical':
+        text_x = loc1.x0 - (xoffset+0.01)
+        text_y = (loc1.y1 + loc1.y0 - yoffset)/2
+    else:
+        text_x = (loc1.x1 + loc1.x0 - xoffset)/2
+        text_y = loc1.y1 + 0.02
+    text = plt.figtext(x=text_x, y=text_y, s=label, rotation=textorient,
+                       ha='center', va='center')
+
+def setup_subplots(figsize=(8,8), usetex=True):
+    matplotlib.rc('text', usetex=usetex)
+    if usetex:
+        matplotlib.rc('font', family='serif', size=12)
+    fig = plt.figure(figsize=figsize)
+    ax0 = plt.subplot2grid((5,4),(0,0),colspan=3,rowspan=3)
+
+    ax1 = plt.subplot2grid((5,4),(3,0))
+    ax2 = plt.subplot2grid((5,4),(3,1))
+    ax3 = plt.subplot2grid((5,4),(3,2))
+
+    ax4 = plt.subplot2grid((5,4),(4,0))
+    ax5 = plt.subplot2grid((5,4),(4,1))
+    ax6 = plt.subplot2grid((5,4),(4,2))
+
+    ax7 = plt.subplot2grid((5,4),(3,3))
+    ax8 = plt.subplot2grid((5,4),(4,3))
+    
+    axes = [ax1, ax2, ax3, ax7, ax4, ax5, ax6, ax8]
+
+    for ax in axes:
+        ax.set_ylim(0,1.1)
+        ax.set_yticks([])
+
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.5, wspace=0.4, left=0.1)
+    loc0 = ax0.get_position()
+    loc0.y0 += 0.03
+    ax0.set_position(loc0)
+
+    add_rectangle(fig, ax1, ax3, '\em{Primary}')
+    add_rectangle(fig, ax4, ax6, '\em{Secondary}', linestyle='dotted')
+    add_rectangle(fig, ax7, ax8, '\em{Derived}', linestyle='dashdot',
+                  xoffset=0.02, textorient='horizontal')
+
+    ax1.set_ylabel('Probability')
+    ax4.set_ylabel('Probability')
+    
+    return fig, axes + [ax0]
 
 def disp_str(stats, k, keyname):
     dvals = [stats[keyname+'_p50'][k],
@@ -48,31 +113,34 @@ def plot_1dpdf(ax, pdf1d_hdu, tagname, xlabel, starnum,
 
     pdf = pdf1d_hdu[tagname].data
 
-    n_objects, n_bins = pdf.shape
-    n_objects -= 1
+    # n_objects, n_bins = pdf.shape
+    # n_objects -= 1
 
-    xvals = pdf[n_objects,:]
+    xvals = pdf[-1,:]
     if logx:
         xvals = np.log10(xvals)
 
-    if tagname == 'Z':
-        gindxs, = np.where(pdf[starnum,:] > 0.)
-        ax.plot(xvals[gindxs],pdf[starnum,gindxs]/max(pdf[starnum,gindxs]),
-                color='k')
-    else:
-        ax.plot(xvals,pdf[starnum,:]/max(pdf[starnum,:]),color='k')
+    # if tagname == 'Z':
+    #     gindxs, = np.where(pdf[starnum,:] > 0.)
+    #     pdf_scaled = pdf[starnum,gindxs]/max(pdf[starnum,gindxs])
+    #     print(pdf_scaled)
+    #     ax.plot(xvals[gindxs], pdf_scaled, color='k')
+    # else:
+    #gindxs = (pdf[starnum,:] > 0.)
+    pdf_scaled = pdf[starnum,:]/max(pdf[starnum,:])
+    ax.plot(xvals,pdf_scaled,color='k')
 
-    ax.yaxis.set_major_locator(MaxNLocator(6))
-    ax.set_yticklabels([])
-    ax.xaxis.set_major_locator(MaxNLocator(4))
+    ax.xaxis.set_major_locator(MaxNLocator(3))
     xlim = [xvals.min(), xvals.max()]
     xlim_delta = xlim[1] - xlim[0]
     ax.set_xlim(xlim[0]-0.05*xlim_delta, xlim[1]+0.05*xlim_delta)
-    #ax.set_ylim(0.0,1.1*pdf[starnum,:].max())
-    ax.set_ylim(0.0,1.1)
-
-    ax.text(0.95, 0.95, xlabel, transform=ax.transAxes,
-            va='top', ha='right')
+    pdfmax = pdf_scaled.argmax()
+    if (xvals[pdfmax] - xlim[0])/xlim_delta >= 0.5:
+        text_x, text_ha = 0.05, 'left'
+    else:
+        text_x, text_ha = 0.95, 'right'
+    ax.text(text_x, 0.95, xlabel, transform=ax.transAxes,
+            va='top', ha=text_ha)
 
     if stats is not None:
         ylim = ax.get_ylim()
@@ -100,22 +168,10 @@ def plot_1dpdf(ax, pdf1d_hdu, tagname, xlabel, starnum,
         ax.plot(np.full((2),pvals[2]),[y1,y2],'-', color='m')
         ax.plot(pvals[1:3],[ym,ym],'-', color='m')
 
-def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
+def plot_beast_ifit(filters, waves, stats, pdf1d_hdu, starnum):
+    k = starnum
 
-    # setup the plot grid
-    gs = gridspec.GridSpec(4, 4,
-                           height_ratios=[1.0,1.0,1.0,1.0],
-                           width_ratios=[1.0,1.0,1.0,1.0])
-    ax = []
-    # plots for the 1D PDFs
-    for j in range(2):
-        for i in range(4):
-            ax.append(plt.subplot(gs[j+2,i]))
-    # now for the big SED plot
-    ax.append(plt.subplot(gs[0:2,0:3]))
-
-    # plot the SED
-    #print(np.sort(stats.colnames))
+    fig, ax = setup_subplots()
 
     n_filters = len(filters)
     
@@ -125,7 +181,6 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     mod_flux = np.empty((n_filters,3),dtype=np.float)
     mod_flux_nd = np.empty((n_filters,3),dtype=np.float)
     mod_flux_wbias = np.empty((n_filters,3),dtype=np.float)
-    k = starnum
 
     c = ap_SkyCoord(ra=stats['RA'][k]*ap_units.degree,
                     dec=stats['DEC'][k]*ap_units.degree,
@@ -167,30 +222,30 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     ax[8].fill_between(waves, mod_flux_nd[:,1], mod_flux_nd[:,2],
                        color='y', alpha = 0.1)
 
-    ax[8].legend(loc='upper right', bbox_to_anchor=(1.25, 1.025))
+    ax[8].legend(loc='upper right', bbox_to_anchor=(1.4, 1.025))
 
     ax[8].set_ylabel(r'Flux [ergs s$^{-1}$ cm$^{-2}$ $\AA^{-1}$]')
     ax[8].set_yscale('log')
 
-    ax[8].set_xscale('log')
-    ax[8].text(0.5,-0.01,r'$\lambda$ [$\AA$]', 
-               transform=ax[8].transAxes, va='top')
+    ax[8].set_xscale('log', minor=False)
+    ax[8].set_xlabel(r'$\lambda$ [$\mu$m]')
     ax[8].set_xlim(0.2,2.0)
-    ax[8].set_xticks([0.2,0.3,0.4,0.5,0.8,0.9,1.0,2.0])
+    ax[8].minorticks_off()
+    ax[8].set_xticks([0.2,0.3,0.4,0.5,0.7,1.0,1.5,2.0])
     ax[8].get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
 
-    ax[8].text(0.05, 0.95, corname, transform=ax[8].transAxes,
-               va='top',ha='left')
+    ax[8].text(0.95, 0.95, corname, transform=ax[8].transAxes,
+               va='top',ha='right')
 
     # add the text results
     keys = ['Av','M_ini','logA','Rv','f_A','Z','logT','logg','logL']
     dispnames = ['A(V)','log(M)','log(t)','R(V)',r'f$_\mathcal{A}$','Z',
                  r'log(T$_\mathrm{eff})$','log(g)','log(L)']
-    laby = 0.72
+    laby = 0.7
     ty = np.linspace(laby-0.07,0.1,num=len(keys))
-    ty[3:] -= 0.025
-    ty[6:] -= 0.025
-    tx = [1.12, 1.2, 1.3]
+    ty[3:] -= 0.035
+    ty[6:] -= 0.035
+    tx = [1.14, 1.22, 1.34]
     for i in range(len(keys)):
         ax[8].text(tx[0], ty[i], dispnames[i],
                    ha='right',
@@ -208,7 +263,7 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     ax[8].text(tx[0],laby, 'Param',
                ha='right',
                transform=ax[8].transAxes)
-    ax[8].text(tx[1],laby, '50%$\pm$33%',
+    ax[8].text(tx[1],laby, r'50\%$\pm$33%',
                ha='center', color='k',
                transform=ax[8].transAxes)
     ax[8].text(tx[2],laby, 'Best',color='k',
@@ -219,31 +274,25 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     tax = ax[8]
 
     # primary
-    rec = Rectangle((tx[0]-0.1,ty[2]-0.02),
-                    tx[2]-tx[0]+0.15, (ty[0]-ty[2])*1.5,
-                    fill=False, lw=2, transform=tax.transAxes,
-                    ls='dashed')
-    rec = tax.add_patch(rec)
-    rec.set_clip_on(False)
+    rec = Rectangle((tx[0]-0.13,ty[2]-0.02),
+                    tx[2]-tx[0]+0.17, (ty[0]-ty[2])*1.6,
+                    fill=False, lw=1, transform=tax.transAxes,
+                    ls='dashed', clip_on=False)
+    tax.add_patch(rec)
 
     # secondary
-    rec = Rectangle((tx[0]-0.1,ty[5]-0.02),
-                    tx[2]-tx[0]+0.15, (ty[3]-ty[5])*1.5,
-                    fill=False, lw=2, transform=tax.transAxes,
-                    ls='dotted')
-    rec = tax.add_patch(rec)
-    rec.set_clip_on(False)
+    rec = Rectangle((tx[0]-0.13,ty[5]-0.02),
+                    tx[2]-tx[0]+0.17, (ty[0]-ty[2])*1.6,
+                    fill=False, lw=1, transform=tax.transAxes,
+                    ls='dotted', clip_on=False)
+    tax.add_patch(rec)
 
     # derived
-    rec = Rectangle((tx[0]-0.1,ty[8]-0.02),
-                    tx[2]-tx[0]+0.15, (ty[6]-ty[8])*1.5,
-                    fill=False, lw=2, transform=tax.transAxes,
-                    ls='dashdot')
-    rec = tax.add_patch(rec)
-    rec.set_clip_on(False)
-
-    # padding for rectangles of 1D PDFs
-    pad = 0.1
+    rec = Rectangle((tx[0]-0.13,ty[8]-0.02),
+                    tx[2]-tx[0]+0.17, (ty[0]-ty[2])*1.6,
+                    fill=False, lw=1, transform=tax.transAxes,
+                    ls='dashdot', clip_on=False)
+    tax.add_patch(rec)
 
     # plot the primary parameter 1D PDFs
     plot_1dpdf(ax[0], pdf1d_hdu, 'Av', 'A(V)', starnum,
@@ -253,24 +302,6 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     plot_1dpdf(ax[2], pdf1d_hdu, 'logA', 'log(t)', starnum,
                stats=stats)
 
-    # draw a box around them and label
-    tax = ax[0]
-    rec = Rectangle((-1.75*pad,-pad),
-                    3*(1.0+pad)+1.5*pad,
-                    1.0+1.5*pad,
-                    fill=False, lw=2, transform=tax.transAxes,
-                    ls='dashed')
-    rec = tax.add_patch(rec)
-    rec.set_clip_on(False)
-
-    tax.text(-2.*pad, 0.5, 'Primary', transform=tax.transAxes, 
-             rotation='vertical', fontstyle='oblique',
-             va='center', ha='right')
-
-    tax.text(0.0, 0.5, 'Probability', transform=tax.transAxes, 
-             rotation='vertical', 
-             va='center', ha='right')
-
     # plot the secondary parameter 1D PDFs
     plot_1dpdf(ax[4], pdf1d_hdu, 'Rv', 'R(V)', starnum,
                stats=stats)
@@ -279,23 +310,6 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     plot_1dpdf(ax[6], pdf1d_hdu, 'Z', 'Z', starnum,
                stats=stats)
 
-    # draw a box around them
-    tax = ax[4]
-    rec = Rectangle((-1.75*pad,-pad),
-                    3*(1.0+pad)+1.5*pad,
-                    1.0+1.5*pad,
-                    fill=False, lw=2, transform=tax.transAxes,
-                    ls='dotted')
-    rec = tax.add_patch(rec)
-    rec.set_clip_on(False)
-
-    tax.text(-2*pad, 0.5, 'Secondary', transform=tax.transAxes, 
-             rotation='vertical', fontstyle='oblique',
-             va='center', ha='right')
-
-    tax.text(0.0, 0.5, 'Probability', transform=tax.transAxes, 
-             rotation='vertical', 
-             va='center', ha='right')
 
     # plot the derived parameter 1D PDFs
     plot_1dpdf(ax[3], pdf1d_hdu, 'logT', r'log(T$_\mathrm{eff})$', starnum,
@@ -303,22 +317,6 @@ def plot_beast_ifit(filters, waves, stats, pdf1d_hdu):
     plot_1dpdf(ax[7], pdf1d_hdu, 'logg', 'log(g)', starnum,
                stats=stats)
 
-    # draw a box around them
-    tax = ax[7]
-    rec = Rectangle((-0.25*pad,-pad),
-                    1.0+0.5*pad,
-                    2*(1.0+2.*pad)-0.125*pad,
-                    fill=False, lw=2, transform=tax.transAxes,
-                    ls='dashdot')
-    rec = tax.add_patch(rec)
-    rec.set_clip_on(False)
-
-    tax.text(0.5, 2*(1.0+2*pad)-1.0*pad, 'Derived', transform=tax.transAxes, 
-             rotation='horizontal', fontstyle='oblique',
-             va='bottom', ha='center')
-
-    # optimize the figure layout
-    plt.tight_layout(h_pad=2.0, w_pad=1.0)
 
 if __name__ == '__main__':
 
@@ -341,13 +339,6 @@ if __name__ == '__main__':
     pdf1d_hdu = fits.open(filebase+'_pdf1d.fits')
 
     # filters for PHAT
-    #filters = ['HST_WFC3_F225W', 'HST_WFC3_F275W', 'HST_WFC3_F336W', 
-    #           'HST_ACS_WFC_F475W','HST_ACS_WFC_F550M', 
-    #           'HST_ACS_WFC_F658N', 'HST_ACS_WFC_F814W',
-    #           'HST_WFC3_F110W', 'HST_WFC3_F160W']
-    #waves = np.asarray([2250., 2750.0, 3360.0, 
-    #                    4750., 5500., 6580., 8140.,
-    #                    11000., 16000.])
     filters = ['HST_WFC3_F275W','HST_WFC3_F336W','HST_ACS_WFC_F475W',
                'HST_ACS_WFC_F814W','HST_WFC3_F110W','HST_WFC3_F160W']
     waves = np.asarray([2722.05531502, 3366.00507206,4763.04670013,
@@ -356,7 +347,7 @@ if __name__ == '__main__':
     fig, ax = plt.subplots(figsize=(8,8))
 
     # make the plot!
-    plot_beast_ifit(filters, waves, stats, pdf1d_hdu)
+    plot_beast_ifit(filters, waves, stats, pdf1d_hdu, starnum)
 
     # show or save
     basename = filebase + '_ifit_starnum_' + str(starnum)
